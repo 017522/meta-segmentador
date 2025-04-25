@@ -28,13 +28,21 @@ briefing = st.file_uploader("📝 Faça upload do briefing do cliente (.txt ou .
 def limpar_texto(texto):
     return texto.strip().lower().replace("\n", " ")
 
-def buscar_segmentacoes(texto, base):
-    resultados = {"INTERESSE": [], "CARGO": [], "COMPORTAMENTO": []}
-    texto_limpo = limpar_texto(texto)
-    for _, row in base.iterrows():
-        if row["NOME"].lower() in texto_limpo:
-            resultados[row["TIPO"]].append(row["NOME"])
-    return resultados
+def gerar_padroes_para_persona(texto, base):
+    texto = limpar_texto(texto)
+    interesses = [x for x in base[base["TIPO"] == "INTERESSE"]["NOME"] if x.lower() in texto]
+    cargos = [x for x in base[base["TIPO"] == "CARGO"]["NOME"] if x.lower() in texto]
+    comportamentos = [x for x in base[base["TIPO"] == "COMPORTAMENTO"]["NOME"] if x.lower() in texto]
+
+    # fallback se algum grupo ficar vazio
+    if not interesses:
+        interesses = base[base["TIPO"] == "INTERESSE"]["NOME"].sample(3).tolist()
+    if not cargos:
+        cargos = base[base["TIPO"] == "CARGO"]["NOME"].sample(3).tolist()
+    if not comportamentos:
+        comportamentos = base[base["TIPO"] == "COMPORTAMENTO"]["NOME"].sample(3).tolist()
+
+    return interesses, cargos, comportamentos
 
 # --- PROCESSAMENTO ---
 if briefing:
@@ -47,29 +55,31 @@ if briefing:
         st.error("Formato de arquivo não suportado.")
         st.stop()
 
-    segmentacoes_encontradas = buscar_segmentacoes(texto_briefing, segmentacoes)
+    interesses, cargos, comportamentos = gerar_padroes_para_persona(texto_briefing, segmentacoes)
 
-    st.success("✅ Segmentações encontradas com sucesso!")
+    st.success("✅ Segmentações geradas com base no briefing!")
     st.markdown("---")
 
-    st.header("🎯 Públicos Gerados")
+    # Público 01
+    st.subheader("Público 01: Interesses + Cargos + Comportamentos")
+    df_p1 = pd.DataFrame({
+        "INTERESSES": interesses,
+        "CARGOS": cargos[:len(interesses)],
+        "COMPORTAMENTOS": comportamentos[:len(interesses)]
+    })
+    st.dataframe(df_p1, use_container_width=True)
 
-    with st.expander("Público 01: INTERESSE + CARGO + COMPORTAMENTO"):
-        for tipo in segmentacoes_encontradas:
-            for item in segmentacoes_encontradas[tipo]:
-                st.markdown(f"- **{tipo.title()}**: {item}")
+    # Público 02
+    st.subheader("Público 02: Apenas INTERESSES")
+    st.dataframe(pd.DataFrame(interesses, columns=["INTERESSES"]))
 
-    with st.expander("Público 02: Apenas INTERESSES"):
-        for i in segmentacoes_encontradas["INTERESSE"]:
-            st.markdown(f"- {i}")
+    # Público 03
+    st.subheader("Público 03: Apenas CARGOS")
+    st.dataframe(pd.DataFrame(cargos, columns=["CARGOS"]))
 
-    with st.expander("Público 03: Apenas CARGOS"):
-        for i in segmentacoes_encontradas["CARGO"]:
-            st.markdown(f"- {i}")
-
-    with st.expander("Público 04: Apenas COMPORTAMENTOS"):
-        for i in segmentacoes_encontradas["COMPORTAMENTO"]:
-            st.markdown(f"- {i}")
+    # Público 04
+    st.subheader("Público 04: Apenas COMPORTAMENTOS")
+    st.dataframe(pd.DataFrame(comportamentos, columns=["COMPORTAMENTOS"]))
 
 else:
     st.warning("⚡ Envie o briefing para gerar os públicos.")
