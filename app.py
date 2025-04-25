@@ -62,10 +62,11 @@ if briefing:
 
     # Público 01
     st.subheader("Público 01: Interesses + Cargos + Comportamentos")
+    min_len = min(len(interesses), len(cargos), len(comportamentos))
     df_p1 = pd.DataFrame({
-        "INTERESSES": interesses,
-        "CARGOS": cargos[:len(interesses)],
-        "COMPORTAMENTOS": comportamentos[:len(interesses)]
+        "INTERESSES": interesses[:min_len],
+        "CARGOS": cargos[:min_len],
+        "COMPORTAMENTOS": comportamentos[:min_len]
     })
     st.dataframe(df_p1, use_container_width=True)
 
