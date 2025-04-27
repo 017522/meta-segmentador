@@ -1,81 +1,62 @@
 import streamlit as st
 import pandas as pd
-import openai
-import docx
+import requests
 
-# Usa a chave que está nas secrets
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# Configuração da página
+st.set_page_config(page_title="Segmentador de Público Meta Ads com IA", page_icon="🎯", layout="wide")
 
-# Carregar a base de segmentações embutida
-@st.cache_data
-def carregar_segmentacoes():
-    return pd.read_excel("Cargo, Comportamentos e Interesses.xlsx")
+# Função para gerar públicos usando Hugging Face
+def gerar_publicos_huggingface(texto):
+    api_url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+    headers = {
+        "Authorization": "Bearer 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"
+    }
+    payload = {
+        "inputs": f"""Leia atentamente o briefing abaixo e com base nele, gere 4 tipos de públicos diferentes para anúncios no Meta Ads:
+        
+        1. Público 01: INTERESSES + CARGOS + COMPORTAMENTOS combinados.
+        2. Público 02: Somente INTERESSES mais relevantes.
+        3. Público 03: Somente CARGOS relevantes.
+        4. Público 04: Somente COMPORTAMENTOS relevantes.
 
-# Função para ler arquivo .txt ou .docx
-def ler_arquivo(uploaded_file):
-    if uploaded_file.name.endswith(".txt"):
-        return uploaded_file.read().decode("utf-8")
-    elif uploaded_file.name.endswith(".docx"):
-        doc = docx.Document(uploaded_file)
-        return "\n".join([p.text for p in doc.paragraphs])
-    else:
-        return None
+        Atenção: Use segmentações existentes dentro do Meta Ads, seja fiel ao briefing, seja estratégico e assertivo.
 
-# Função para conversar com a API OpenAI
-def gerar_publicos(texto_briefing):
-    prompt = f"""
-Você é um especialista em tráfego pago.
+        Briefing: {texto}
+        """
+    }
+    response = requests.post(api_url, headers=headers, json=payload)
+    response.raise_for_status()
+    return response.json()
 
-Baseado no briefing abaixo:
-\"\"\"{texto_briefing}\"\"\"
-
-Analise a persona descrita e cruze com a nossa lista de segmentações.
-
-Monte 4 públicos:
-
-- Público 01: Interesses + Cargos + Comportamentos
-- Público 02: Apenas Interesses
-- Público 03: Apenas Cargos
-- Público 04: Apenas Comportamentos
-
-Utilize somente segmentações disponíveis. NÃO invente nada.
-
-Responda estruturado, separado por tópicos.
-
-Capriche para ser estratégico!
-
-"""
-
-    resposta = openai.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "Você é um especialista em segmentação para Meta Ads."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.2
-    )
-
-    return resposta.choices[0].message.content
-
-# --- Interface no Streamlit ---
-
+# Interface do Streamlit
 st.title("🎯 Segmentador de Público Meta Ads com IA")
-st.caption("Faça upload do briefing (.txt ou .docx)")
 
-arquivo_briefing = st.file_uploader("Drag and drop file here", type=["txt", "docx"])
+st.caption("Faça upload do briefing do cliente (.txt ou .docx)")
 
-if arquivo_briefing:
-    briefing_texto = ler_arquivo(arquivo_briefing)
+uploaded_file = st.file_uploader("Drag and drop file here", type=["txt", "docx"])
+
+if uploaded_file:
+    file_extension = uploaded_file.name.split(".")[-1]
+
+    if file_extension == "txt":
+        texto_briefing = uploaded_file.read().decode("utf-8")
+    elif file_extension == "docx":
+        from docx import Document
+        doc = Document(uploaded_file)
+        texto_briefing = "\n".join([p.text for p in doc.paragraphs if p.text.strip() != ""])
+    else:
+        st.error("Formato de arquivo não suportado. Envie um arquivo .txt ou .docx.")
+        st.stop()
 
     st.success("Briefing carregado com sucesso! Gerando públicos...")
 
-    segmentacoes_df = carregar_segmentacoes()
-
     try:
-        publicos_gerados = gerar_publicos(briefing_texto)
+        resposta = gerar_publicos_huggingface(texto_briefing)
+        resposta_texto = resposta[0]['generated_text']
 
-        st.subheader("Públicos Gerados:")
-        st.write(publicos_gerados)
+        st.markdown("---")
+        st.subheader("🔎 Públicos Gerados:")
+        st.markdown(f"```{resposta_texto}```")
 
     except Exception as e:
-        st.error(f"Ocorreu um erro: {e}")
+        st.error(f"Erro ao gerar públicos: {e}")
