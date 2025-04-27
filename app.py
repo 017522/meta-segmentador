@@ -1,67 +1,81 @@
 import streamlit as st
 import pandas as pd
 import openai
-import os
+import docx
 
-# Carregar a planilha embutida
-planilha = pd.read_excel("Cargo, Comportamentos e Interesses.xlsx")
+# Usa a chave que está nas secrets
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# Configurar a API KEY
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Carregar a base de segmentações embutida
+@st.cache_data
+def carregar_segmentacoes():
+    return pd.read_excel("Cargo, Comportamentos e Interesses.xlsx")
 
-# Função para gerar públicos usando o GPT
-def gerar_publicos(briefing):
+# Função para ler arquivo .txt ou .docx
+def ler_arquivo(uploaded_file):
+    if uploaded_file.name.endswith(".txt"):
+        return uploaded_file.read().decode("utf-8")
+    elif uploaded_file.name.endswith(".docx"):
+        doc = docx.Document(uploaded_file)
+        return "\n".join([p.text for p in doc.paragraphs])
+    else:
+        return None
+
+# Função para conversar com a API OpenAI
+def gerar_publicos(texto_briefing):
     prompt = f"""
-Você é um especialista em Meta Ads. Baseado nesse briefing de cliente:
-\"\"\"{briefing}\"\"\"
-e usando apenas os INTERESSES, CARGOS e COMPORTAMENTOS da planilha que te fornecerei, 
-estruture 4 públicos:
+Você é um especialista em tráfego pago.
 
-Público 01: Interesses + Cargos + Comportamentos combinados
-Público 02: Apenas Interesses
-Público 03: Apenas Cargos
-Público 04: Apenas Comportamentos
+Baseado no briefing abaixo:
+\"\"\"{texto_briefing}\"\"\"
 
-A lista disponível é: {planilha.to_string(index=False)}
+Analise a persona descrita e cruze com a nossa lista de segmentações.
 
-Importante: use apenas termos da lista. Não invente nada novo.
-Retorne organizado.
+Monte 4 públicos:
+
+- Público 01: Interesses + Cargos + Comportamentos
+- Público 02: Apenas Interesses
+- Público 03: Apenas Cargos
+- Público 04: Apenas Comportamentos
+
+Utilize somente segmentações disponíveis. NÃO invente nada.
+
+Responda estruturado, separado por tópicos.
+
+Capriche para ser estratégico!
 
 """
 
-    resposta = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=1500
+    resposta = openai.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "Você é um especialista em segmentação para Meta Ads."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.2
     )
 
-    return resposta['choices'][0]['message']['content']
+    return resposta.choices[0].message.content
 
-# Interface Streamlit
-st.set_page_config(page_title="Segmentador de Público Meta Ads", page_icon="🎯")
+# --- Interface no Streamlit ---
+
 st.title("🎯 Segmentador de Público Meta Ads com IA")
+st.caption("Faça upload do briefing (.txt ou .docx)")
 
-uploaded_file = st.file_uploader("Faça upload do briefing (.txt ou .docx)", type=["txt", "docx"])
+arquivo_briefing = st.file_uploader("Drag and drop file here", type=["txt", "docx"])
 
-if uploaded_file is not None:
-    briefing_texto = uploaded_file.read()
-
-    if uploaded_file.name.endswith(".docx"):
-        import docx
-        from io import BytesIO
-
-        doc = docx.Document(BytesIO(briefing_texto))
-        briefing_texto = "\n".join([p.text for p in doc.paragraphs])
-
-    else:
-        briefing_texto = briefing_texto.decode("utf-8")
+if arquivo_briefing:
+    briefing_texto = ler_arquivo(arquivo_briefing)
 
     st.success("Briefing carregado com sucesso! Gerando públicos...")
 
-    # Gera os públicos
-    publicos_gerados = gerar_publicos(briefing_texto)
+    segmentacoes_df = carregar_segmentacoes()
 
-    st.markdown("---")
-    st.subheader("🎯 Públicos Gerados")
-    st.markdown(publicos_gerados)
+    try:
+        publicos_gerados = gerar_publicos(briefing_texto)
+
+        st.subheader("Públicos Gerados:")
+        st.write(publicos_gerados)
+
+    except Exception as e:
+        st.error(f"Ocorreu um erro: {e}")
