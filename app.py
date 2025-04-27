@@ -1,86 +1,67 @@
 import streamlit as st
 import pandas as pd
-from docx import Document
+import openai
+import os
 
-# --- CONFIG PÁGINA ---
-st.set_page_config(page_title="Segmentador de Público Meta Ads", layout="centered")
-st.title("🎯 Segmentador de Público Meta Ads Sniper")
+# Carregar a planilha embutida
+planilha = pd.read_excel("Cargo, Comportamentos e Interesses.xlsx")
 
-# --- CARREGAR PLANILHA PADRÃO (3 COLUNAS: Cargos, Comportamento, Interesses) ---
-@st.cache_data
+# Configurar a API KEY
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-def carregar_segmentacoes():
-    df = pd.read_excel("Cargo, Comportamentos e Interesses.xlsx")
-    dados = []
-    for tipo in ["CARGOS", "COMPORTAMENTO", "INTERESSES"]:
-        col = df.columns[df.columns.str.upper().str.contains(tipo)].tolist()
-        if col:
-            for item in df[col[0]].dropna().unique():
-                dados.append({"NOME": str(item).strip(), "TIPO": tipo[:-1] if tipo.endswith("S") else tipo})
-    return pd.DataFrame(dados)
+# Função para gerar públicos usando o GPT
+def gerar_publicos(briefing):
+    prompt = f"""
+Você é um especialista em Meta Ads. Baseado nesse briefing de cliente:
+\"\"\"{briefing}\"\"\"
+e usando apenas os INTERESSES, CARGOS e COMPORTAMENTOS da planilha que te fornecerei, 
+estruture 4 públicos:
 
-segmentacoes = carregar_segmentacoes()
+Público 01: Interesses + Cargos + Comportamentos combinados
+Público 02: Apenas Interesses
+Público 03: Apenas Cargos
+Público 04: Apenas Comportamentos
 
-# --- UPLOAD DO BRIEFING ---
-briefing = st.file_uploader("📝 Faça upload do briefing do cliente (.txt ou .docx)", type=["txt", "docx"])
+A lista disponível é: {planilha.to_string(index=False)}
 
-# --- FUNÇÕES ---
-def limpar_texto(texto):
-    return texto.strip().lower().replace("\n", " ")
+Importante: use apenas termos da lista. Não invente nada novo.
+Retorne organizado.
 
-def gerar_padroes_para_persona(texto, base):
-    texto = limpar_texto(texto)
-    interesses = [x for x in base[base["TIPO"] == "INTERESSE"]["NOME"] if x.lower() in texto]
-    cargos = [x for x in base[base["TIPO"] == "CARGO"]["NOME"] if x.lower() in texto]
-    comportamentos = [x for x in base[base["TIPO"] == "COMPORTAMENTO"]["NOME"] if x.lower() in texto]
+"""
 
-    # fallback se algum grupo ficar vazio
-    if not interesses:
-        interesses = base[base["TIPO"] == "INTERESSE"]["NOME"].sample(3).tolist()
-    if not cargos:
-        cargos = base[base["TIPO"] == "CARGO"]["NOME"].sample(3).tolist()
-    if not comportamentos:
-        comportamentos = base[base["TIPO"] == "COMPORTAMENTO"]["NOME"].sample(3).tolist()
+    resposta = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=1500
+    )
 
-    return interesses, cargos, comportamentos
+    return resposta['choices'][0]['message']['content']
 
-# --- PROCESSAMENTO ---
-if briefing:
-    if briefing.name.endswith(".txt"):
-        texto_briefing = briefing.read().decode("utf-8")
-    elif briefing.name.endswith(".docx"):
-        doc = Document(briefing)
-        texto_briefing = "\n".join([p.text for p in doc.paragraphs if p.text.strip() != ""])
+# Interface Streamlit
+st.set_page_config(page_title="Segmentador de Público Meta Ads", page_icon="🎯")
+st.title("🎯 Segmentador de Público Meta Ads com IA")
+
+uploaded_file = st.file_uploader("Faça upload do briefing (.txt ou .docx)", type=["txt", "docx"])
+
+if uploaded_file is not None:
+    briefing_texto = uploaded_file.read()
+
+    if uploaded_file.name.endswith(".docx"):
+        import docx
+        from io import BytesIO
+
+        doc = docx.Document(BytesIO(briefing_texto))
+        briefing_texto = "\n".join([p.text for p in doc.paragraphs])
+
     else:
-        st.error("Formato de arquivo não suportado.")
-        st.stop()
+        briefing_texto = briefing_texto.decode("utf-8")
 
-    interesses, cargos, comportamentos = gerar_padroes_para_persona(texto_briefing, segmentacoes)
+    st.success("Briefing carregado com sucesso! Gerando públicos...")
 
-    st.success("✅ Segmentações geradas com base no briefing!")
+    # Gera os públicos
+    publicos_gerados = gerar_publicos(briefing_texto)
+
     st.markdown("---")
-
-    # Público 01
-    st.subheader("Público 01: Interesses + Cargos + Comportamentos")
-    min_len = min(len(interesses), len(cargos), len(comportamentos))
-    df_p1 = pd.DataFrame({
-        "INTERESSES": interesses[:min_len],
-        "CARGOS": cargos[:min_len],
-        "COMPORTAMENTOS": comportamentos[:min_len]
-    })
-    st.dataframe(df_p1, use_container_width=True)
-
-    # Público 02
-    st.subheader("Público 02: Apenas INTERESSES")
-    st.dataframe(pd.DataFrame(interesses, columns=["INTERESSES"]))
-
-    # Público 03
-    st.subheader("Público 03: Apenas CARGOS")
-    st.dataframe(pd.DataFrame(cargos, columns=["CARGOS"]))
-
-    # Público 04
-    st.subheader("Público 04: Apenas COMPORTAMENTOS")
-    st.dataframe(pd.DataFrame(comportamentos, columns=["COMPORTAMENTOS"]))
-
-else:
-    st.warning("⚡ Envie o briefing para gerar os públicos.")
+    st.subheader("🎯 Públicos Gerados")
+    st.markdown(publicos_gerados)
